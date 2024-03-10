@@ -328,13 +328,15 @@ def is_not_forward_angle(n, theta):
     n = n.unsqueeze(1)
     ncostheta = torch.cos(theta) * n
     assert ncostheta.shape == theta.shape, "ncostheta and theta shape doesnt match"
-    answer = torch.empty_like(ncostheta, dtype=torch.bool)
-    answer[torch.where(torch.abs(ncostheta.imag) > 100 * EPSILON)] = (
-        ncostheta.imag[torch.where(torch.abs(ncostheta.imag) > 100 * EPSILON)] > 0
-    )
-    answer[torch.where(~(torch.abs(ncostheta.imag) > 100 * EPSILON))] = (
-        ncostheta.real[torch.where(~(torch.abs(ncostheta.imag) > 100 * EPSILON))] > 0
-    )
+    answer = torch.zeros(theta.shape, dtype=bool)
+    # Either evanescent decay or lossy medium. Either way, the one that
+    # decays is the forward-moving wave
+    answer = (abs(ncostheta.imag) > 100 * EPSILON) * (ncostheta.imag > 0)
+    # Forward is the one with positive Poynting vector
+    # Poynting vector is Re[n cos(theta)] for s-polarization or
+    # Re[n cos(theta*)] for p-polarization, but it turns out they're consistent
+    # so I'll just assume s then check both below
+    answer = (~(abs(ncostheta.imag) > 100 * EPSILON)) * (ncostheta.real > 0)
 
     # answer = (~(abs(ncostheta.imag) > 100 * EPSILON)) * (ncostheta.real > 0)
 
