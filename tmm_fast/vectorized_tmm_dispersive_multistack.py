@@ -286,15 +286,17 @@ def SnellLaw_vectorized(n, th):
     # The first and last entry need to be the forward angle (the intermediate
     # layers don't matter, see https://arxiv.org/abs/1603.02720 Section 5)
 
-    first_not_fwd_angle = is_not_forward_angle(n[:, 0], angles[:, :, 0])
-    last_not_fwd_angle = is_not_forward_angle(n[:, -1], angles[:, :, -1])
+    angles[:, :, 0] = torch.where(
+        is_not_forward_angle(n[:, 0], angles[:, :, 0]).bool(),
+        pi - angles[:, :, 0],
+        angles[:, :, 0],
+    )
+    angles[:, :, -1] = torch.where(
+        is_not_forward_angle(n[:, -1], angles[:, :, -1]).bool(),
+        pi - angles[:, :, -1],
+        angles[:, :, -1],
+    )
 
-    angles[:, :, 0] = (
-        first_not_fwd_angle * pi - (first_not_fwd_angle*2 - 1) * angles[:, :, 0]
-    )
-    angles[:, :, -1] = (
-        last_not_fwd_angle * pi - (last_not_fwd_angle*2 - 1) * angles[:, :, -1]
-    )
     return angles
 
 
