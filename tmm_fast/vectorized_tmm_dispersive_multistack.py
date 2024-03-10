@@ -286,11 +286,14 @@ def SnellLaw_vectorized(n, th):
     # The first and last entry need to be the forward angle (the intermediate
     # layers don't matter, see https://arxiv.org/abs/1603.02720 Section 5)
 
+    first_not_fwd_angle = is_not_forward_angle(n[:, 0], angles[:, :, 0])
+    last_not_fwd_angle = is_not_forward_angle(n[:, -1], angles[:, :, -1])
+
     angles[:, :, 0] = (
-        -is_not_forward_angle(n[:, 0], angles[:, :, 0]) * pi + angles[:, :, 0]
+        first_not_fwd_angle * pi - (first_not_fwd_angle*2 - 1) * angles[:, :, 0]
     )
     angles[:, :, -1] = (
-        -is_not_forward_angle(n[:, -1], angles[:, :, -1]) * pi + angles[:, :, -1]
+        last_not_fwd_angle * pi - (last_not_fwd_angle*2 - 1) * angles[:, :, -1]
     )
     return angles
 
@@ -324,20 +327,20 @@ def is_not_forward_angle(n, theta):
     ncostheta = torch.cos(theta) * n
     assert ncostheta.shape == theta.shape, "ncostheta and theta shape doesnt match"
     answer = torch.empty_like(ncostheta, dtype=torch.bool)
-    answer[torch.where(ncostheta.imag > 100 * EPSILON)] = (
-        ncostheta.imag[torch.where(ncostheta.imag > 100 * EPSILON)] > 0
+    answer[torch.where(torch.abs(ncostheta.imag) > 100 * EPSILON)] = (
+        ncostheta.imag[torch.where(torch.abs(ncostheta.imag) > 100 * EPSILON)] > 0
     )
-    answer[torch.where(~(ncostheta.imag > 100 * EPSILON))] = (
-        ncostheta.real[torch.where(~(ncostheta.imag > 100 * EPSILON))] > 0
+    answer[torch.where(~(torch.abs(ncostheta.imag) > 100 * EPSILON))] = (
+        ncostheta.real[torch.where(~(torch.abs(ncostheta.imag) > 100 * EPSILON))] > 0
     )
 
     # answer = (~(abs(ncostheta.imag) > 100 * EPSILON)) * (ncostheta.real > 0)
 
     # Case Im(n) < 0
-    assert (ncostheta.imag > -100 * EPSILON)[~answer].all(), error_string
+    assert (ncostheta.imag > -100 * EPSILON)[answer].all(), error_string
 
     # Case Re(n) < 0
-    assert (ncostheta.real > -100 * EPSILON)[~answer].all(), error_string
+    assert (ncostheta.real > -100 * EPSILON)[answer].all(), error_string
     assert ((n * torch.cos(torch.conj(theta))).real > -100 * EPSILON)[
         answer
     ].all(), error_string
