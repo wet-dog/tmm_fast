@@ -400,65 +400,6 @@ def is_not_forward_angle(n, theta):
     return answer
 
 
-def is_forward_angle(n, theta):
-    """
-    if a wave is traveling at angle theta from normal in a medium with index n,
-    calculate whether or not this is the forward-traveling wave (i.e., the one
-    going from front to back of the stack, like the incoming or outgoing waves,
-    but unlike the reflected wave). For real n & theta, the criterion is simply
-    -pi/2 < theta < pi/2, but for complex n & theta, it's more complicated.
-    See https://arxiv.org/abs/1603.02720 appendix D. If theta is the forward
-    angle, then (pi-theta) is the backward angle and vice-versa.
-    """
-    n = n.clone().detach().to(torch.cfloat)  # torch.tensor(n, dtype=torch.cfloat)
-    assert torch.all(n.real * n.imag >= 0), (
-        "For materials with gain, it's ambiguous which "
-        "beam is incoming vs outgoing. See "
-        "https://arxiv.org/abs/1603.02720 Appendix C.\n"
-        "n: " + str(n) + "   angle: " + str(theta)
-    )
-    # assert n.dtype is not complex,  ("For materials with gain, it's ambiguous which "
-    #                               "beam is incoming vs outgoing. See "
-    #                               "https://arxiv.org/abs/1603.02720 Appendix C.\n"
-    #                               "n: " + str(n) + "   angle: " + str(theta))
-
-    ncostheta = n * torch.cos(theta)
-    ncostheta = (
-        ncostheta.clone().detach().to(torch.cfloat)
-    )  # torch.tensor(ncostheta, dtype=torch.cfloat)
-    if torch.all(abs(ncostheta.imag) > 100 * EPSILON):
-        # Either evanescent decay or lossy medium. Either way, the one that
-        # decays is the forward-moving wave
-        answer = ncostheta.imag > 0
-    else:
-        # Forward is the one with positive Poynting vector
-        # Poynting vector is Re[n cos(theta)] for s-polarization or
-        # Re[n cos(theta*)] for p-polarization, but it turns out they're consistent
-        # so I'll just assume s then check both below
-        answer = torch.any((ncostheta.real > 0))
-    # convert from numpy boolean to the normal Python boolean
-    answer = bool(answer)
-    # double-check the answer ... can't be too careful!
-    error_string = (
-        "It's not clear which beam is incoming vs outgoing. Weird"
-        " index maybe?\n"
-        "n: " + str(n) + "   angle: " + str(theta)
-    )
-    if answer is True:
-        assert torch.all(ncostheta.imag > -100 * EPSILON), error_string
-        assert torch.all(ncostheta.real > -100 * EPSILON), error_string
-        assert torch.all(
-            (n * torch.cos(theta.conj())).real > -100 * EPSILON
-        ), error_string
-    else:
-        assert torch.all(ncostheta.imag < 100 * EPSILON), error_string
-        assert torch.all(ncostheta.real < 100 * EPSILON), error_string
-        assert torch.all(
-            (n * torch.cos(theta.conjugate())).real < 100 * EPSILON
-        ), error_string
-    return answer
-
-
 def interface_r_vec(polarization, n_i, n_f, th_i, th_f):
     """
     reflection amplitude (from Fresnel equations)
