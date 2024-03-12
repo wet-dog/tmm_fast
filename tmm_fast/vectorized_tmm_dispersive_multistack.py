@@ -214,7 +214,7 @@ def coh_vec_tmm_disp_mstack(
         dtype=torch.complex128,
         device=device,
     )
-    Mtilde[:, :, :] = make_2x2_tensor(1, 0, 0, 1, dtype=torch.complex128)
+    Mtilde[:, :, :] = torch.eye(2, dtype=torch.complex128)
 
     # contract the M_list matrix along the dimension of the layers, all
     for i in range(1, num_layers - 1):
@@ -568,7 +568,3 @@ def check_inputs(N, T, lambda_vacuum, theta):
             > np.finfo(float).eps
         )
     )
-
-
-def make_2x2_tensor(a, b, c, d, dtype=float):
-    return torch.as_tensor([[a, b], [c, d]], dtype=float)
