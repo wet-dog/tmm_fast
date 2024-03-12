@@ -104,16 +104,18 @@ def coh_vec_tmm_disp_mstack(
 
     if timer:
         import time
-
         starttime = time.time()
+
     datatype = check_datatype(N, T, lambda_vacuum, Theta)
     # check uniform data types (e.g. only np.array or torch.tensor) -> save this type
     N = converter(N, device)
     T = converter(T, device)
     lambda_vacuum = converter(lambda_vacuum, device)
     Theta = converter(Theta, device)
+
     if timer:
         push_time = time.time() - starttime
+
     num_layers = T.shape[0]
     num_angles = Theta.shape[0]
     num_wavelengths = lambda_vacuum.shape[0]
@@ -131,9 +133,7 @@ def coh_vec_tmm_disp_mstack(
     theta = (
         2 * np.pi * torch.einsum("kij,ij->kij", torch.cos(SnellThetas), N)
     )  # [theta,d, lambda]
-    kz_list = torch.einsum(
-        "ijk,k->kij", theta, 1 / lambda_vacuum
-    )  # [lambda, theta, d]
+    kz_list = torch.einsum("ijk,k->kij", theta, 1 / lambda_vacuum)  # [lambda, theta, d]
 
     # kz is the z-component of (complex) angular wavevector for the forward-moving
     # wave. Positive imaginary part means decaying.
@@ -188,12 +188,8 @@ def coh_vec_tmm_disp_mstack(
     M_list[:, :, 1:-1, 0, 1] = torch.einsum(
         "hji,jhi->jhi", 1 / (A + np.finfo(float).eps), F / t_list[:, :, 1:]
     )
-    M_list[:, :, 1:-1, 1, 0] = torch.einsum(
-        "hji,jhi->jhi", A, F / t_list[:, :, 1:]
-    )
-    M_list[:, :, 1:-1, 1, 1] = torch.einsum(
-        "hji,jhi->jhi", A, 1 / t_list[:, :, 1:]
-    )
+    M_list[:, :, 1:-1, 1, 0] = torch.einsum("hji,jhi->jhi", A, F / t_list[:, :, 1:])
+    M_list[:, :, 1:-1, 1, 1] = torch.einsum("hji,jhi->jhi", A, 1 / t_list[:, :, 1:])
     Mtilde = torch.empty(
         (num_angles, num_wavelengths, 2, 2),
         dtype=torch.complex128,
@@ -227,9 +223,7 @@ def coh_vec_tmm_disp_mstack(
     # Net transmitted and reflected power, as a proportion of the incoming light
     # power.
     R = R_from_r_vec(r)
-    T = T_from_t_vec(
-        pol, t, N[0], N[-1], SnellThetas[:, 0], SnellThetas[:, -1]
-    )
+    T = T_from_t_vec(pol, t, N[0], N[-1], SnellThetas[:, 0], SnellThetas[:, -1])
 
     if datatype is np.ndarray:
         r = numpy_converter(r)
@@ -451,9 +445,9 @@ def check_datatype(N, T, lambda_vacuum, Theta):
 
 def check_inputs(N, T, lambda_vacuum, theta):
     # check the dimensionalities of N:
-    assert (
-        N.ndim == 2
-    ), "N is not of shape [L x W] (2d), as it is of dimension " + str(N.ndim)
+    assert N.ndim == 2, "N is not of shape [L x W] (2d), as it is of dimension " + str(
+        N.ndim
+    )
     # check the dimensionalities of T:
     assert T.ndim == 1, "T is not of shape [L] (1d), as it is of dimension " + str(
         T.ndim
