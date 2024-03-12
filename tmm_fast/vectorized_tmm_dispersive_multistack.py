@@ -334,47 +334,6 @@ def is_not_forward_angle(n, theta):
     ].all(), error_string
     answer = (~answer).clone().detach().type(torch.float)
 
-    # for cross checking of the answer
-    # answer_tmm = torch.empty_like(answer, dtype=torch.bool)
-    # for i, _ in enumerate(answer_tmm):
-    #     for j, _ in enumerate(answer_tmm[i]):
-    #         for k, _ in enumerate(answer_tmm[i,j]):
-
-    #             m, t = n[i,0,k].numpy(), theta[i,j,k].numpy()
-    #             assert m.real * m.imag >= 0, ("For materials with gain, it's ambiguous which "
-    #                                     "beam is incoming vs outgoing. See "
-    #                                     "https://arxiv.org/abs/1603.02720 Appendix C.\n"
-    #                                     "n: " + str(m) + "   angle: " + str(t))
-    #             ncostheta2 = m * np.cos(t)
-    #             if abs(ncostheta2.imag) > 100 * EPSILON:
-    #                 # Either evanescent decay or lossy medium. Either way, the one that
-    #                 # decays is the forward-moving wave
-    #                 answer2 = (ncostheta2.imag > 0)
-    #             else:
-    #                 # Forward is the one with positive Poynting vector
-    #                 # Poynting vector is Re[n cos(theta)] for s-polarization or
-    #                 # Re[n cos(theta*)] for p-polarization, but it turns out they're consistent
-    #                 # so I'll just assume s then check both below
-    #                 answer2 = (ncostheta2.real > 0)
-    #             # convert from numpy boolean to the normal Python boolean
-    #             answer2 = bool(answer2)
-    #             # double-check the answer ... can't be too careful!
-    #             error_string = ("It's not clear which beam is incoming vs outgoing. Weird"
-    #                             " index maybe?\n"
-    #                             "n: " + str(m) + "   angle: " + str(t))
-    #             if answer2 is True:
-    #                 assert ncostheta2.imag > -100 * EPSILON, error_string
-    #                 assert ncostheta2.real > -100 * EPSILON, error_string
-    #                 assert (m * np.cos(t.conjugate())).real > -100 * EPSILON, error_string
-    #             else:
-    #                 assert ncostheta2.imag < 100 * EPSILON, error_string
-    #                 assert ncostheta2.real < 100 * EPSILON, error_string
-    #                 assert (m * np.cos(t.conjugate())).real < 100 * EPSILON, error_string
-
-    #             answer_tmm[i,j,k] = answer2
-
-    # torch.testing.assert_close((~answer_tmm).type(torch.float), answer)
-
     return answer
 
 
