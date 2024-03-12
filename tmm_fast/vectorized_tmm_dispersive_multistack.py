@@ -34,14 +34,14 @@ def coh_vec_tmm_disp_mstack(
     pol : str
         Polarization of the light, accepts only 's' or 'p'
     N : Tensor or array
-        PyTorch Tensor or numpy array of shape [S x L x W] with complex or real entries which contain the refractive
+        PyTorch Tensor or numpy array of shape [L x W] with complex or real entries which contain the refractive
         indices at the wavelengths of interest:
-        S is the number of multi-layer thin films, L is the number of layers for each thin film, W is the number of
+        L is the number of layers for each thin film, W is the number of
         wavelength considered. Note that the first and last layer must feature real valued ()
-        refractive indicies, i.e. imag(N[:, 0, :]) = 0 and imag(N[:, -1, :]) = 0.
+        refractive indicies, i.e. imag(N[0, :]) = 0 and imag(N[-1, :]) = 0.
     T : Tensor or array
         Holds the layer thicknesses of the individual layers for a bunch of thin films in nanometer.
-        T is of shape [S x L] with real-valued entries; infinite values are allowed for the first and last layers only!
+        T is of shape [L] with real-valued entries; infinite values are allowed for the first and last layers only!
     Theta : Tensor or array
         Theta is a tensor or array that determines the angles with which the light propagates in the injection layer.
         Theta is of shape [A] and holds the incidence angles [rad] in its entries.
@@ -63,7 +63,7 @@ def coh_vec_tmm_disp_mstack(
             't' : Tensor or array of Fresnel coefficients of transmission for each stack (over angle and wavelength)
             'R' : Tensor or array of Reflectivity / Reflectance for each stack (over angle and wavelength)
             'T' : Tensor or array of Transmissivity / Transmittance for each stack (over angle and wavelength)
-            Each of these tensors or arrays is of shape [S x A x W]
+            Each of these tensors or arrays is of shape [A x W]
     optional output: list of two floats if timer=True
             first entry holds the push time [sec] that is the time required to push the input data on the specified
             device (i.e. cpu oder cuda), the second entry holds the total computation time [sec] (push time + tmm)
@@ -112,31 +112,16 @@ def coh_vec_tmm_disp_mstack(
     T = converter(T, device)
     lambda_vacuum = converter(lambda_vacuum, device)
     Theta = converter(Theta, device)
-    squeezed_N = False
-    squeezed_T = False
-    if N.ndim < 3:
-        squeezed_N = True
-        N = N.unsqueeze(0)
-    if T.ndim < 2:
-        squeezed_T = True
-        T = T.unsqueeze(0)
-    assert squeezed_N == squeezed_T, (
-        "N and T are not of same shape, as they are of dimensions "
-        + str(N.ndim)
-        + " and "
-        + str(T.ndim)
-    )
     if timer:
         push_time = time.time() - starttime
-    num_layers = T.shape[1]
-    num_stacks = T.shape[0]
+    num_layers = T.shape[0]
     num_angles = Theta.shape[0]
     num_wavelengths = lambda_vacuum.shape[0]
     check_inputs(N, T, lambda_vacuum, Theta)
     N.imag = torch.clamp(N.imag, max=35.0)
 
     # if a constant refractive index is used (no dispersion) extend the tensor
-    if N.ndim == 2:
+    if N.ndim == 1:
         N = torch.tile(N, (num_wavelengths, 1)).T
 
     # SnellThetas is a tensor, for each stack and layer, the angle that the light travels
@@ -144,10 +129,10 @@ def coh_vec_tmm_disp_mstack(
     SnellThetas = SnellLaw_vectorized(N, Theta)
 
     theta = (
-        2 * np.pi * torch.einsum("skij,sij->skij", torch.cos(SnellThetas), N)
+        2 * np.pi * torch.einsum("kij,ij->kij", torch.cos(SnellThetas), N)
     )  # [theta,d, lambda]
     kz_list = torch.einsum(
-        "sijk,k->skij", theta, 1 / lambda_vacuum
+        "ijk,k->kij", theta, 1 / lambda_vacuum
     )  # [lambda, theta, d]
 
     # kz is the z-component of (complex) angular wavevector for the forward-moving
@@ -156,7 +141,7 @@ def coh_vec_tmm_disp_mstack(
     # delta is the total phase accrued by traveling through a given layer.
     # Ignore warning about inf multiplication
 
-    delta = torch.einsum("skij,sj->skij", kz_list, T)
+    delta = torch.einsum("kij,j->kij", kz_list, T)
 
     # check for opacity. If too much of the optical power is absorbed in a layer
     # it can lead to numerical instability.
@@ -172,85 +157,79 @@ def coh_vec_tmm_disp_mstack(
 
     t_list = interface_t_vec(
         pol,
-        N[:, :-1, :],
-        N[:, 1:, :],
-        SnellThetas[:, :, :-1, :],
-        SnellThetas[:, :, 1:, :],
+        N[:-1, :],
+        N[1:, :],
+        SnellThetas[:, :-1, :],
+        SnellThetas[:, 1:, :],
     )
     r_list = interface_r_vec(
         pol,
-        N[:, :-1, :],
-        N[:, 1:, :],
-        SnellThetas[:, :, :-1, :],
-        SnellThetas[:, :, 1:, :],
+        N[:-1, :],
+        N[1:, :],
+        SnellThetas[:, :-1, :],
+        SnellThetas[:, 1:, :],
     )
 
     # A ist the propagation term for matrix optic and holds the appropriate accumulated phase for the thickness
     # of each layer
-    A = torch.exp(1j * delta[:, :, :, 1:-1])
-    F = r_list[:, :, :, 1:]
+    A = torch.exp(1j * delta[:, :, 1:-1])
+    F = r_list[:, :, 1:]
 
     # M_list holds the transmission and reflection matrices from matrix-optics
 
     M_list = torch.zeros(
-        (num_stacks, num_angles, num_wavelengths, num_layers, 2, 2),
+        (num_angles, num_wavelengths, num_layers, 2, 2),
         dtype=torch.complex128,
         device=device,
     )
-    M_list[:, :, :, 1:-1, 0, 0] = torch.einsum(
-        "shji,sjhi->sjhi", 1 / (A + np.finfo(float).eps), 1 / t_list[:, :, :, 1:]
+    M_list[:, :, 1:-1, 0, 0] = torch.einsum(
+        "hji,jhi->jhi", 1 / (A + np.finfo(float).eps), 1 / t_list[:, :, 1:]
     )
-    M_list[:, :, :, 1:-1, 0, 1] = torch.einsum(
-        "shji,sjhi->sjhi", 1 / (A + np.finfo(float).eps), F / t_list[:, :, :, 1:]
+    M_list[:, :, 1:-1, 0, 1] = torch.einsum(
+        "hji,jhi->jhi", 1 / (A + np.finfo(float).eps), F / t_list[:, :, 1:]
     )
-    M_list[:, :, :, 1:-1, 1, 0] = torch.einsum(
-        "shji,sjhi->sjhi", A, F / t_list[:, :, :, 1:]
+    M_list[:, :, 1:-1, 1, 0] = torch.einsum(
+        "hji,jhi->jhi", A, F / t_list[:, :, 1:]
     )
-    M_list[:, :, :, 1:-1, 1, 1] = torch.einsum(
-        "shji,sjhi->sjhi", A, 1 / t_list[:, :, :, 1:]
+    M_list[:, :, 1:-1, 1, 1] = torch.einsum(
+        "hji,jhi->jhi", A, 1 / t_list[:, :, 1:]
     )
     Mtilde = torch.empty(
-        (num_stacks, num_angles, num_wavelengths, 2, 2),
+        (num_angles, num_wavelengths, 2, 2),
         dtype=torch.complex128,
         device=device,
     )
-    Mtilde[:, :, :] = torch.eye(2, dtype=torch.complex128)
+    Mtilde[:, :] = torch.eye(2, dtype=torch.complex128)
 
     # contract the M_list matrix along the dimension of the layers, all
     for i in range(1, num_layers - 1):
-        Mtilde = torch.einsum("sijkl,sijlm->sijkm", Mtilde, M_list[:, :, :, i])
+        Mtilde = torch.einsum("ijkl,ijlm->ijkm", Mtilde, M_list[:, :, i])
 
     # M_r0 accounts for the first and last stack where the translation coefficients are 1
     # todo: why compute separately?
     M_r0 = torch.empty(
-        (num_stacks, num_angles, num_wavelengths, 2, 2),
+        (num_angles, num_wavelengths, 2, 2),
         dtype=torch.cfloat,
         device=device,
     )
-    M_r0[:, :, :, 0, 0] = 1
-    M_r0[:, :, :, 0, 1] = r_list[:, :, :, 0]
-    M_r0[:, :, :, 1, 0] = r_list[:, :, :, 0]
-    M_r0[:, :, :, 1, 1] = 1
-    M_r0 = torch.einsum("sijkl,sij->sijkl", M_r0, 1 / t_list[:, :, :, 0])
+    M_r0[:, :, 0, 0] = 1
+    M_r0[:, :, 0, 1] = r_list[:, :, 0]
+    M_r0[:, :, 1, 0] = r_list[:, :, 0]
+    M_r0[:, :, 1, 1] = 1
+    M_r0 = torch.einsum("ijkl,ij->ijkl", M_r0, 1 / t_list[:, :, 0])
 
-    Mtilde = torch.einsum("shijk,shikl->shijl", M_r0, Mtilde)
+    Mtilde = torch.einsum("hijk,hikl->hijl", M_r0, Mtilde)
 
     # Net complex transmission and reflection amplitudes
-    r = Mtilde[:, :, :, 1, 0] / (Mtilde[:, :, :, 0, 0] + np.finfo(float).eps)
-    t = 1 / (Mtilde[:, :, :, 0, 0] + np.finfo(float).eps)
+    r = Mtilde[:, :, 1, 0] / (Mtilde[:, :, 0, 0] + np.finfo(float).eps)
+    t = 1 / (Mtilde[:, :, 0, 0] + np.finfo(float).eps)
 
     # Net transmitted and reflected power, as a proportion of the incoming light
     # power.
     R = R_from_r_vec(r)
     T = T_from_t_vec(
-        pol, t, N[:, 0], N[:, -1], SnellThetas[:, :, 0], SnellThetas[:, :, -1]
+        pol, t, N[0], N[-1], SnellThetas[:, 0], SnellThetas[:, -1]
     )
-
-    if squeezed_T and r.shape[0] == 1:
-        r = torch.reshape(r, (r.shape[1], r.shape[2]))
-        R = torch.reshape(R, (R.shape[1], R.shape[2]))
-        T = torch.reshape(T, (T.shape[1], T.shape[2]))
-        t = torch.reshape(t, (t.shape[1], t.shape[2]))
 
     if datatype is np.ndarray:
         r = numpy_converter(r)
@@ -280,21 +259,21 @@ def SnellLaw_vectorized(n, th):
     th = th if th.dtype == torch.complex128 else th.type(torch.complex128)
     n = n if n.dtype == torch.complex128 else n.type(torch.complex128)
 
-    n0_ = torch.einsum("hk,j,hik->hjik", n[:, 0], torch.sin(th), 1 / n)
+    n0_ = torch.einsum("k,j,ik->jik", n[0], torch.sin(th), 1 / n)
     angles = torch.asin(n0_)
 
     # The first and last entry need to be the forward angle (the intermediate
     # layers don't matter, see https://arxiv.org/abs/1603.02720 Section 5)
 
-    angles[:, :, 0] = torch.where(
-        is_not_forward_angle(n[:, 0], angles[:, :, 0]).bool(),
-        pi - angles[:, :, 0],
-        angles[:, :, 0],
+    angles[:, 0] = torch.where(
+        is_not_forward_angle(n[0], angles[:, 0]).bool(),
+        pi - angles[:, 0],
+        angles[:, 0],
     )
-    angles[:, :, -1] = torch.where(
-        is_not_forward_angle(n[:, -1], angles[:, :, -1]).bool(),
-        pi - angles[:, :, -1],
-        angles[:, :, -1],
+    angles[:, -1] = torch.where(
+        is_not_forward_angle(n[-1], angles[:, -1]).bool(),
+        pi - angles[:, -1],
+        angles[:, -1],
     )
 
     return angles
@@ -325,7 +304,6 @@ def is_not_forward_angle(n, theta):
         "https://arxiv.org/abs/1603.02720 Appendix C.\n"
         "n: " + str(n) + "   angle: " + str(theta)
     )
-    n = n.unsqueeze(1)
     ncostheta = torch.cos(theta) * n
     assert ncostheta.shape == theta.shape, "ncostheta and theta shape doesnt match"
     answer = torch.empty_like(ncostheta, dtype=torch.bool)
@@ -409,12 +387,12 @@ def interface_r_vec(polarization, n_i, n_f, th_i, th_f):
     (in radians, where 0=normal). "th" stands for "theta".
     """
     if polarization == "s":
-        ni_thi = torch.einsum("sij,skij->skji", n_i, torch.cos(th_i))
-        nf_thf = torch.einsum("sij,skij->skji", n_f, torch.cos(th_f))
+        ni_thi = torch.einsum("ij,kij->kji", n_i, torch.cos(th_i))
+        nf_thf = torch.einsum("ij,kij->kji", n_f, torch.cos(th_f))
         return (ni_thi - nf_thf) / (ni_thi + nf_thf)
     elif polarization == "p":
-        nf_thi = torch.einsum("sij,skij->skji", n_f, torch.cos(th_i))
-        ni_thf = torch.einsum("sij,skij->skji", n_i, torch.cos(th_f))
+        nf_thi = torch.einsum("ij,kij->kji", n_f, torch.cos(th_i))
+        ni_thf = torch.einsum("ij,kij->kji", n_i, torch.cos(th_f))
         return (nf_thi - ni_thf) / (nf_thi + ni_thf)
     else:
         raise ValueError("Polarization must be 's' or 'p'")
@@ -429,13 +407,13 @@ def interface_t_vec(polarization, n_i, n_f, th_i, th_f):
     (in radians, where 0=normal). "th" stands for "theta".
     """
     if polarization == "s":
-        ni_thi = torch.einsum("sij,skij->skji", n_i, torch.cos(th_i))
-        nf_thf = torch.einsum("sij,skij->skji", n_f, torch.cos(th_f))
+        ni_thi = torch.einsum("ij,kij->kji", n_i, torch.cos(th_i))
+        nf_thf = torch.einsum("ij,kij->kji", n_f, torch.cos(th_f))
         return 2 * ni_thi / (ni_thi + nf_thf)
     elif polarization == "p":
-        nf_thi = torch.einsum("sij,skij->skji", n_f, torch.cos(th_i))
-        ni_thf = torch.einsum("sij,skij->skji", n_i, torch.cos(th_f))
-        ni_thi = torch.einsum("sij,skij->skji", n_i, torch.cos(th_i))
+        nf_thi = torch.einsum("ij,kij->kji", n_f, torch.cos(th_i))
+        ni_thf = torch.einsum("ij,kij->kji", n_i, torch.cos(th_f))
+        ni_thi = torch.einsum("ij,kij->kji", n_i, torch.cos(th_i))
         return 2 * ni_thi / (nf_thi + ni_thf)
     else:
         raise ValueError("Polarization must be 's' or 'p'")
@@ -468,13 +446,13 @@ def T_from_t_vec(pol, t, n_i, n_f, th_i, th_f):
     """
 
     if pol == "s":
-        ni_thi = torch.real(torch.cos(th_i) * n_i.unsqueeze(1))
-        nf_thf = torch.real(torch.cos(th_f) * n_f.unsqueeze(1))
+        ni_thi = torch.real(torch.cos(th_i) * n_i)
+        nf_thf = torch.real(torch.cos(th_f) * n_f)
         return abs(t**2) * ((nf_thf) / (ni_thi))
 
     elif pol == "p":
-        ni_thi = torch.real(torch.conj(torch.cos(th_i)) * n_i.unsqueeze(1))
-        nf_thf = torch.real(torch.conj(torch.cos(th_f)) * n_f.unsqueeze(1))
+        ni_thi = torch.real(torch.conj(torch.cos(th_i)) * n_i)
+        nf_thf = torch.real(torch.conj(torch.cos(th_f)) * n_f)
         return abs(t**2) * ((nf_thf) / (ni_thi))
 
     else:
@@ -517,22 +495,14 @@ def check_datatype(N, T, lambda_vacuum, Theta):
 def check_inputs(N, T, lambda_vacuum, theta):
     # check the dimensionalities of N:
     assert (
-        N.ndim == 3
-    ), "N is not of shape [S x L x W] (3d), as it is of dimension " + str(N.ndim)
+        N.ndim == 2
+    ), "N is not of shape [L x W] (2d), as it is of dimension " + str(N.ndim)
     # check the dimensionalities of T:
-    assert T.ndim == 2, "T is not of shape [S x L] (2d), as it is of dimension " + str(
+    assert T.ndim == 1, "T is not of shape [L] (1d), as it is of dimension " + str(
         T.ndim
     )
     assert T.shape[0] == N.shape[0], (
-        "The number of thin-films (first dimension) of N and T must coincide, \
-    \nfound N.shape="
-        + str(N.shape)
-        + " and T.shape="
-        + str(T.shape)
-        + " instead!"
-    )
-    assert T.shape[1] == N.shape[1], (
-        "The number of thin-film layers (second dimension) of N and T must coincide, \
+        "The number of thin-film layers (first dimension) of N and T must coincide, \
     \nfound N.shape="
         + str(N.shape)
         + " and T.shape="
@@ -558,13 +528,13 @@ def check_inputs(N, T, lambda_vacuum, theta):
     )
     # check well defined property of refractive indicies for the first and last layer:
     answer = torch.all(
-        abs((torch.einsum("ij,k->ijk", N[:, 0], torch.sin(theta)).imag))
+        abs((torch.einsum("i,j->ij", N[0], torch.sin(theta)).imag))
         < np.finfo(float).eps
     )
     assert answer, (
         "Non well-defined refractive indicies detected for first layer, check index "
         + torch.argwhere(
-            abs((torch.einsum("ij,k->ijk", N[:, 0], torch.sin(theta)).imag))
+            abs((torch.einsum("i,j->ij", N[0], torch.sin(theta)).imag))
             > np.finfo(float).eps
         )
     )
