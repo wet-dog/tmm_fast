@@ -571,13 +571,4 @@ def check_inputs(N, T, lambda_vacuum, theta):
 
 
 def make_2x2_tensor(a, b, c, d, dtype=float):
-    """
-    Makes a 2x2 numpy array of [[a,b],[c,d]]
-    Same as "numpy.array([[a,b],[c,d]], dtype=float)", but ten times faster
-    """
-    my_array = torch.empty((2, 2), dtype=dtype)
-    my_array[0, 0] = a
-    my_array[0, 1] = b
-    my_array[1, 0] = c
-    my_array[1, 1] = d
-    return my_array
+    return torch.as_tensor([[a, b], [c, d]], dtype=float)
